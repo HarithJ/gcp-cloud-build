@@ -1,0 +1,82 @@
+steps:
+  # Build container image
+  - id: "build image"
+    name: "gcr.io/cloud-builders/docker"
+    args: 
+      [
+        "build",
+        "-t",
+        "${_ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY_NAME}/${_DOCKER_IMAGE}:${COMMIT_SHA}",
+        "-f",
+        "./compose/production/django/Dockerfile",
+        "."
+      ]
+
+  # Push container image 
+  - id: "Push image"
+    name: "gcr.io/cloud-builders/docker"
+    args: ["push", "${_ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY_NAME}/${_DOCKER_IMAGE}:${COMMIT_SHA}"]
+
+  # Apply migrations
+  - id: "apply migrations"
+    name: "gcr.io/google-appengine/exec-wrapper"
+    args:
+      [
+        "-i",
+        "${_ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY_NAME}/${_DOCKER_IMAGE}:${COMMIT_SHA}",
+        "-s",
+        "${_DB_CONNECTION_NAME}",
+        "-e",
+        "READ_ENV_VARS_FROM_SECRET_MANAGER=${_READ_ENV_VARS_FROM_SECRET_MANAGER}",
+        "-e",
+        "GCP_SECRET_MANAGER=${_GCP_SECRET_MANAGER}",
+        "-e",
+        "DJANGO_SETTINGS_MODULE=${_DJANGO_SETTINGS_MODULE}",
+        "--",
+        "python",
+        "manage.py",
+        "migrate",
+      ]
+
+  # Run collectstatic
+  - id: "collect static"
+    name: "gcr.io/google-appengine/exec-wrapper"
+    args:
+      [
+        "-i",
+        "${_ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY_NAME}/${_DOCKER_IMAGE}:${COMMIT_SHA}",
+        "-s",
+        "${_DB_CONNECTION_NAME}",
+        "-e",
+        "READ_ENV_VARS_FROM_SECRET_MANAGER=${_READ_ENV_VARS_FROM_SECRET_MANAGER}",
+        "-e",
+        "GCP_SECRET_MANAGER=${_GCP_SECRET_MANAGER}",
+        "-e",
+        "DJANGO_SETTINGS_MODULE=${_DJANGO_SETTINGS_MODULE}",
+        "--",
+        "python",
+        "manage.py",
+        "collectstatic",
+        "--verbosity",
+        "2",
+        "--no-input",
+      ]
+
+  # Deploy container image to Cloud Run
+  - id: "Deploy to Cloud Run"
+    name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: "gcloud"
+    args:
+    - "run"
+    - "deploy"
+    - "${_SERVICE_NAME}"
+    - "--image"
+    - "${_ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY_NAME}/${_DOCKER_IMAGE}:${COMMIT_SHA}"
+    - "--region"
+    - "${_REGION}"
+
+images:
+  - "${_ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY_NAME}/${_DOCKER_IMAGE}:${COMMIT_SHA}"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
